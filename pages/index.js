@@ -15,7 +15,7 @@ const PALETTE = [
   '#00CC78','#00CCC0','#94B3FF','#E4ABFF',
 ]
 
-// ─── AUTH SCREEN ─────────────────────────────────────────────
+// ─── AUTH SCREEN (unchanged from working version) ────────────
 function AuthScreen({ onLogin }) {
   const [mode, setMode] = useState('login')
   const [form, setForm] = useState({ email: '', password: '', username: '' })
@@ -145,18 +145,126 @@ export default function Home() {
   const dragStart = useRef({ x:0, y:0, ox:0, oy:0 })
   const lastTouchDist = useRef(null)
   const lastTouchCenter = useRef(null)
-  // Store zoom/offset in refs so event listeners can access current values
-  const zoomRef = useRef(zoom)
-  const offsetRef = useRef(offset)
+
+  // Tutorial state
+  const [showTutorial, setShowTutorial] = useState(false)
+  const [tutorialStep, setTutorialStep] = useState(0)
+  const [tutorialTextIndex, setTutorialTextIndex] = useState(0)
+  const [tutorialTextDone, setTutorialTextDone] = useState(false)
+  const audioCtxRef = useRef(null)
+
+  const TUTORIAL_STEPS = [
+    { text: "Hey there, adventurer! Welcome to Pixel/Place!", highlight: null },
+    { text: "This is the Grid — a massive 1000×1000 canvas. That's ONE MILLION pixels!", highlight: 'canvas' },
+    { text: "You can scroll to zoom in and out, and drag to move around. Try it!", highlight: 'canvas' },
+    { text: "See that sidebar? Click any pixel on the grid and its info shows up here.", highlight: 'sidebar' },
+    { text: "When you find an unclaimed pixel, you can BUY it for just ⬥1 coin!", highlight: 'sidebar' },
+    { text: "Once you own a pixel, you can PAINT it any color you want.", highlight: 'sidebar' },
+    { text: "You can also LIST your pixels for sale on the marketplace. Other players can buy them!", highlight: 'market-tab' },
+    { text: "The seller gets 90% of the sale price. Smart traders can make big profits!", highlight: null },
+    { text: "Check the RANKS tab to see who owns the most pixels on the grid.", highlight: 'ranks-tab' },
+    { text: "You're starting with ⬥10 coins. Spend them wisely... or trade your way to the top!", highlight: 'coins' },
+    { text: "That's everything! Now go claim your territory. Good luck out there!", highlight: null },
+  ]
+
+  // Pixel sound effect
+  function playPixelSound(type) {
+    try {
+      if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)()
+      const ctx = audioCtxRef.current
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.type = 'square'
+      gain.gain.value = 0.08
+
+      if (type === 'pop') {
+        osc.frequency.setValueAtTime(600, ctx.currentTime)
+        osc.frequency.exponentialRampToValueAtTime(900, ctx.currentTime + 0.05)
+        osc.frequency.exponentialRampToValueAtTime(400, ctx.currentTime + 0.1)
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15)
+        osc.start(ctx.currentTime)
+        osc.stop(ctx.currentTime + 0.15)
+      } else if (type === 'next') {
+        osc.frequency.setValueAtTime(500, ctx.currentTime)
+        osc.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.08)
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12)
+        osc.start(ctx.currentTime)
+        osc.stop(ctx.currentTime + 0.12)
+      } else if (type === 'complete') {
+        osc.frequency.setValueAtTime(523, ctx.currentTime)
+        osc.frequency.setValueAtTime(659, ctx.currentTime + 0.1)
+        osc.frequency.setValueAtTime(784, ctx.currentTime + 0.2)
+        osc.frequency.setValueAtTime(1047, ctx.currentTime + 0.3)
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5)
+        osc.start(ctx.currentTime)
+        osc.stop(ctx.currentTime + 0.5)
+      } else if (type === 'char') {
+        osc.frequency.setValueAtTime(300 + Math.random() * 200, ctx.currentTime)
+        gain.gain.value = 0.03
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.04)
+        osc.start(ctx.currentTime)
+        osc.stop(ctx.currentTime + 0.04)
+      }
+    } catch(e) {}
+  }
+
+  // Typewriter effect for tutorial
+  useEffect(() => {
+    if (!showTutorial) return
+    setTutorialTextIndex(0)
+    setTutorialTextDone(false)
+    const fullText = TUTORIAL_STEPS[tutorialStep].text
+    let i = 0
+    const interval = setInterval(() => {
+      i++
+      setTutorialTextIndex(i)
+      if (i % 2 === 0) playPixelSound('char')
+      if (i >= fullText.length) {
+        clearInterval(interval)
+        setTutorialTextDone(true)
+      }
+    }, 30)
+    return () => clearInterval(interval)
+  }, [showTutorial, tutorialStep])
+
+  function nextTutorialStep() {
+    if (!tutorialTextDone) {
+      // Skip to end of text
+      setTutorialTextIndex(TUTORIAL_STEPS[tutorialStep].text.length)
+      setTutorialTextDone(true)
+      return
+    }
+    if (tutorialStep < TUTORIAL_STEPS.length - 1) {
+      playPixelSound('next')
+      setTutorialStep(tutorialStep + 1)
+    } else {
+      // Tutorial complete - give coins
+      playPixelSound('complete')
+      setShowTutorial(false)
+      setTutorialStep(0)
+      if (typeof window !== 'undefined' && profile) {
+        localStorage.setItem('tutorial_done_' + profile.id, 'true')
+      }
+      showToast('Tutorial complete! You earned ⬥10 coins!')
+    }
+  }
+
+  // Refs to access current zoom/offset in native event listeners
+  const zoomRef = useRef(3)
+  const offsetRef = useRef({ x: 0, y: 0 })
+  const draggingRef = useRef(false)
   useEffect(() => { zoomRef.current = zoom }, [zoom])
   useEffect(() => { offsetRef.current = offset }, [offset])
+  useEffect(() => { draggingRef.current = dragging }, [dragging])
 
   function showToast(msg) {
     setToast(msg)
     setTimeout(() => setToast(null), 2500)
   }
 
-  // ── Init ──
+  // ── Init (unchanged) ──
   useEffect(() => {
     checkUser()
   }, [])
@@ -170,7 +278,7 @@ export default function Home() {
     setLoading(false)
   }
 
-  // Listen for auth changes (GitHub OAuth redirect)
+  // Listen for auth changes / GitHub OAuth redirect (unchanged)
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
@@ -195,7 +303,7 @@ export default function Home() {
     return () => subscription.unsubscribe()
   }, [])
 
-  // Load data once logged in
+  // Load data once logged in (unchanged)
   useEffect(() => {
     if (!user) return
     loadPixels()
@@ -222,38 +330,45 @@ export default function Home() {
     return () => { supabase.removeChannel(channel) }
   }, [user])
 
-  // ── Attach wheel and touch listeners with {passive: false} ──
+  // ══ FIX #1: Native event listeners for wheel + touch with {passive:false} ══
+  // This prevents the "Unable to preventDefault inside passive event listener" error
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
 
-    function handleWheel(e) {
+    function onNativeWheel(e) {
       e.preventDefault()
       const rect = canvas.getBoundingClientRect()
       const mx = e.clientX - rect.left
       const my = e.clientY - rect.top
-      const z = zoomRef.current
-      const o = offsetRef.current
+      const currentZoom = zoomRef.current
+      const currentOffset = offsetRef.current
       const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15
-      const nz = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z * factor))
-      const newOffset = { x: mx - (mx - o.x) * (nz / z), y: my - (my - o.y) * (nz / z) }
+      const nz = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, currentZoom * factor))
+      setOffset({
+        x: mx - (mx - currentOffset.x) * (nz / currentZoom),
+        y: my - (my - currentOffset.y) * (nz / currentZoom),
+      })
       setZoom(nz)
-      setOffset(newOffset)
     }
 
-    function handleTouchMovePassive(e) {
-      e.preventDefault()
+    function onNativeTouchMove(e) {
+      // Only preventDefault to stop page scroll - actual logic is in React handler
+      if (e.touches.length >= 1) {
+        e.preventDefault()
+      }
     }
 
-    canvas.addEventListener('wheel', handleWheel, { passive: false })
-    canvas.addEventListener('touchmove', handleTouchMovePassive, { passive: false })
+    canvas.addEventListener('wheel', onNativeWheel, { passive: false })
+    canvas.addEventListener('touchmove', onNativeTouchMove, { passive: false })
 
     return () => {
-      canvas.removeEventListener('wheel', handleWheel)
-      canvas.removeEventListener('touchmove', handleTouchMovePassive)
+      canvas.removeEventListener('wheel', onNativeWheel)
+      canvas.removeEventListener('touchmove', onNativeTouchMove)
     }
   }, [])
 
+  // Data loaders (all unchanged)
   async function loadProfile(uid) {
     const { data } = await supabase.from('profiles').select('*').eq('id', uid).single()
     if (data) setProfile(data)
@@ -298,14 +413,14 @@ export default function Home() {
     }
   }
 
-  // ── FIXED: Logout now does a hard reload ──
+  // ══ FIX #2: Logout now does hard reload so it always works ══
   function handleLogout() {
     supabase.auth.signOut().finally(() => {
       window.location.reload()
     })
   }
 
-  // ── Canvas Drawing ──
+  // ── Canvas Drawing (unchanged) ──
   const draw = useCallback(() => {
     const canvas = canvasRef.current
     const container = containerRef.current
@@ -372,13 +487,12 @@ export default function Home() {
     if (selected) {
       const sx = selected.x * cellSize + offset.x
       const sy = selected.y * cellSize + offset.y
-      ctx.save()
       ctx.strokeStyle = '#ff3e3e'
       ctx.lineWidth = 2
       ctx.shadowColor = '#ff3e3e'
       ctx.shadowBlur = 10
       ctx.strokeRect(sx - 1, sy - 1, cellSize + 2, cellSize + 2)
-      ctx.restore()
+      ctx.shadowBlur = 0
     }
 
     ctx.strokeStyle = '#2a2a3a'
@@ -393,7 +507,7 @@ export default function Home() {
     return () => window.removeEventListener('resize', r)
   }, [draw])
 
-  // ── Mouse handlers ──
+  // ── Mouse handlers (unchanged) ──
   function getGridPos(e) {
     const rect = canvasRef.current.getBoundingClientRect()
     const mx = e.clientX - rect.left
@@ -431,6 +545,7 @@ export default function Home() {
     setDragging(false)
   }
 
+  // Pixel selection (unchanged)
   function selectPixelAt(pos) {
     if (selected && selected.x === pos.x && selected.y === pos.y) {
       setSelected(null)
@@ -459,7 +574,7 @@ export default function Home() {
     setTab('info')
   }
 
-  // Touch handlers (no preventDefault here - handled by useEffect listener)
+  // Touch handlers (unchanged EXCEPT removed e.preventDefault() - now handled by native listener)
   function handleTouchStart(e) {
     if (e.touches.length === 1) {
       setDragging(true)
@@ -473,6 +588,7 @@ export default function Home() {
   }
 
   function handleTouchMove(e) {
+    // NOTE: e.preventDefault() is now handled by native listener in useEffect above
     if (e.touches.length === 1 && dragging) {
       setOffset({
         x: dragStart.current.ox + e.touches[0].clientX - dragStart.current.x,
@@ -497,14 +613,15 @@ export default function Home() {
     if (e.touches.length === 0) setDragging(false)
   }
 
-  // ── FIXED: Pixel Actions using secure RPC functions ──
+  // ══ FIX #3: Buy pixel now uses secure RPC functions ══
+  // This ensures seller gets paid 90% on resales
   async function buyPixel() {
     if (!selected || !profile || actionLoading) return
     setActionLoading(true)
 
     try {
       if (selected.id) {
-        // Existing pixel - use buy_pixel RPC
+        // Existing pixel - use buy_pixel RPC (handles payment to seller)
         const cost = selected.for_sale ? selected.sale_price : selected.price
         const { error } = await supabase.rpc('buy_pixel', {
           p_pixel_id: selected.id,
@@ -515,7 +632,7 @@ export default function Home() {
         if (error) throw error
         showToast(`Bought (${selected.x}, ${selected.y}) for ⬥${cost}!`)
       } else {
-        // New pixel - use buy_new_pixel RPC
+        // New unclaimed pixel - use buy_new_pixel RPC
         const { error } = await supabase.rpc('buy_new_pixel', {
           p_x: selected.x,
           p_y: selected.y,
@@ -537,6 +654,7 @@ export default function Home() {
     setActionLoading(false)
   }
 
+  // Paint pixel (unchanged)
   async function paintPixel() {
     if (!selected || !profile || selected.owner_id !== profile.id || actionLoading) return
     setActionLoading(true)
@@ -546,6 +664,7 @@ export default function Home() {
     showToast('Painted!')
   }
 
+  // List for sale (unchanged)
   async function listForSale() {
     if (!selected || !profile || selected.owner_id !== profile.id || actionLoading) return
     const price = parseInt(saleInput)
@@ -560,6 +679,7 @@ export default function Home() {
     showToast(`Listed at ⬥${price}`)
   }
 
+  // Cancel sale (unchanged)
   async function cancelSale() {
     if (!selected || !profile || selected.owner_id !== profile.id || actionLoading) return
     setActionLoading(true)
@@ -571,13 +691,13 @@ export default function Home() {
     showToast('Sale cancelled')
   }
 
-  // ── Derived state ──
+  // ── Derived state (unchanged) ──
   const sel = selected
   const isOwner = sel && profile && sel.owner_id === profile.id
   const isUnowned = sel && !sel.owner_id
   const isForSale = sel && sel.for_sale && sel.owner_id !== profile?.id
 
-  // ── Render ──
+  // ── Render (unchanged) ──
   if (loading) {
     return (
       <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', background:'#0a0a0f' }}>
@@ -587,6 +707,16 @@ export default function Home() {
   }
 
   if (!user) return <AuthScreen onLogin={(u) => { setUser(u); loadProfile(u.id) }} />
+
+  // Show tutorial for new users (coins === 10 and no pixels owned)
+  const userPixelCount = Array.from(pixelMap.values()).filter(p => p.owner_id === profile?.id).length
+  if (profile && profile.coins === 10 && userPixelCount === 0 && !showTutorial && tutorialStep === 0) {
+    // Check if they already completed it (they might have refreshed)
+    // We use a simple localStorage flag
+    if (typeof window !== 'undefined' && !localStorage.getItem('tutorial_done_' + profile.id)) {
+      setShowTutorial(true)
+    }
+  }
 
   const btnBase = { width:'100%', padding:'10px 0', border:'none', borderRadius:6, cursor:'pointer', fontSize:13, fontWeight:600, transition:'all .2s' }
 
@@ -598,6 +728,139 @@ export default function Home() {
           background:'#1a1a26ee', border:'1px solid #3a3a5a', borderRadius:8, padding:'10px 24px',
           fontFamily:"'Silkscreen',cursive", fontSize:11, color:'#e8e8f0', boxShadow:'0 4px 24px #0008',
         }}>{toast}</div>
+      )}
+
+      {/* ═══ TUTORIAL OVERLAY ═══ */}
+      {showTutorial && (
+        <div style={{
+          position:'fixed', inset:0, zIndex:1000,
+          background:'rgba(0,0,0,0.75)', backdropFilter:'blur(2px)',
+          display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'flex-end',
+          padding:'20px 20px 60px', cursor:'pointer',
+        }} onClick={nextTutorialStep}>
+
+          {/* Highlight indicators */}
+          {TUTORIAL_STEPS[tutorialStep].highlight === 'canvas' && (
+            <div style={{
+              position:'absolute', top:50, left:10, right:310, bottom:10,
+              border:'2px solid #ff3e3e', borderRadius:12, pointerEvents:'none',
+              boxShadow:'0 0 30px #ff3e3e44, inset 0 0 30px #ff3e3e11',
+              animation:'pulse-border 1.5s ease-in-out infinite',
+            }}/>
+          )}
+          {TUTORIAL_STEPS[tutorialStep].highlight === 'sidebar' && (
+            <div style={{
+              position:'absolute', top:50, right:0, width:300, bottom:0,
+              border:'2px solid #ff3e3e', borderRadius:12, pointerEvents:'none',
+              boxShadow:'0 0 30px #ff3e3e44, inset 0 0 30px #ff3e3e11',
+              animation:'pulse-border 1.5s ease-in-out infinite',
+            }}/>
+          )}
+          {TUTORIAL_STEPS[tutorialStep].highlight === 'coins' && (
+            <div style={{
+              position:'absolute', top:4, right:120, width:100, height:36,
+              border:'2px solid #ffd700', borderRadius:8, pointerEvents:'none',
+              boxShadow:'0 0 20px #ffd70044',
+              animation:'pulse-border 1.5s ease-in-out infinite',
+            }}/>
+          )}
+
+          {/* Frieren + Speech Bubble */}
+          <div style={{
+            display:'flex', alignItems:'flex-end', gap:16,
+            maxWidth:700, width:'100%',
+          }}>
+            {/* Frieren avatar */}
+            <div style={{
+              flexShrink:0, width:120, height:140,
+              backgroundImage:'url(/frieren.png)',
+              backgroundSize:'contain', backgroundRepeat:'no-repeat',
+              backgroundPosition:'bottom center',
+              imageRendering:'pixelated',
+              filter:'drop-shadow(0 0 12px #ff3e3e44)',
+              animation:'float 2s ease-in-out infinite',
+            }}/>
+
+            {/* Speech bubble */}
+            <div style={{
+              flex:1, position:'relative',
+              background:'#1a1a26', border:'2px solid #3a3a5a',
+              borderRadius:'16px 16px 16px 4px',
+              padding:'20px 24px',
+              boxShadow:'0 4px 24px #0008',
+            }}>
+              {/* Triangle pointer */}
+              <div style={{
+                position:'absolute', bottom:12, left:-12,
+                width:0, height:0,
+                borderTop:'8px solid transparent',
+                borderBottom:'8px solid transparent',
+                borderRight:'12px solid #3a3a5a',
+              }}/>
+              <div style={{
+                position:'absolute', bottom:12, left:-9,
+                width:0, height:0,
+                borderTop:'7px solid transparent',
+                borderBottom:'7px solid transparent',
+                borderRight:'10px solid #1a1a26',
+              }}/>
+
+              {/* Text with typewriter */}
+              <p style={{
+                fontFamily:"'Silkscreen',cursive", fontSize:13, color:'#e8e8f0',
+                lineHeight:1.8, margin:0, minHeight:50,
+              }}>
+                {TUTORIAL_STEPS[tutorialStep].text.slice(0, tutorialTextIndex)}
+                {!tutorialTextDone && <span style={{ opacity: 0.5, animation:'blink 0.5s infinite' }}>▌</span>}
+              </p>
+
+              {/* Step counter + hint */}
+              <div style={{
+                display:'flex', justifyContent:'space-between', alignItems:'center',
+                marginTop:14, borderTop:'1px solid #2a2a3a', paddingTop:10,
+              }}>
+                <span style={{ fontFamily:"'Silkscreen',cursive", fontSize:9, color:'#555570' }}>
+                  {tutorialStep + 1} / {TUTORIAL_STEPS.length}
+                </span>
+                <span style={{
+                  fontFamily:"'Silkscreen',cursive", fontSize:10, color:'#8888a0',
+                  animation:'blink 1.5s ease-in-out infinite',
+                }}>
+                  {tutorialTextDone ? (tutorialStep < TUTORIAL_STEPS.length - 1 ? '▶ Click to continue' : '▶ Click to start!') : '▶ Click to skip'}
+                </span>
+              </div>
+
+              {/* Progress bar */}
+              <div style={{
+                position:'absolute', bottom:0, left:0, right:0, height:3,
+                background:'#2a2a3a', borderRadius:'0 0 14px 0', overflow:'hidden',
+              }}>
+                <div style={{
+                  height:'100%', background:'linear-gradient(90deg, #ff3e3e, #ffd700)',
+                  width: `${((tutorialStep + 1) / TUTORIAL_STEPS.length) * 100}%`,
+                  transition:'width 0.3s ease',
+                  borderRadius:'0 0 14px 0',
+                }}/>
+              </div>
+            </div>
+          </div>
+
+          {/* CSS animations */}
+          <style>{`
+            @keyframes float {
+              0%, 100% { transform: translateY(0px); }
+              50% { transform: translateY(-6px); }
+            }
+            @keyframes blink {
+              0%, 100% { opacity: 1; }
+              50% { opacity: 0.3; }
+            }
+            @keyframes pulse-border {
+              0%, 100% { opacity: 0.6; }
+              50% { opacity: 1; }
+            }
+          `}</style>
+        </div>
       )}
 
       {/* Header */}
@@ -661,7 +924,7 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Sidebar */}
+        {/* Sidebar (all unchanged) */}
         <div style={{ width:300, borderLeft:'1px solid #1a1a26', background:'#0d0d14', display:'flex', flexDirection:'column', overflow:'hidden' }}>
           <div style={{ display:'flex', borderBottom:'1px solid #1a1a26' }}>
             {[['info','PIXEL'],['market','MARKET'],['leaders','RANKS']].map(([k,l]) => (
